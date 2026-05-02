@@ -1,69 +1,83 @@
 import os
-import yt_dlp
 import asyncio
 import uuid
+import re
+import glob
 from core.progress import ProgressUpdater
-
-def yt_dlp_download_sync(url: str, quality: str, updater: ProgressUpdater, tmp_dir: str, cookies_txt: str = None):
-    format_map = {
-        "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "720p": "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best",
-        "480p": "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best",
-        "360p": "bestvideo[ext=mp4][height<=360]+bestaudio[ext=m4a]/best[ext=mp4][height<=360]/best",
-        "audio": "bestaudio/best"
-    }
-
-    ydl_format = format_map.get(quality, format_map["best"])
-
-    def my_hook(d):
-        if d['status'] == 'downloading':
-            try:
-                percent_str = d.get('_percent_str', '0%').replace('\x1b[0;94m', '').replace('\x1b[0m', '').strip()
-                speed_str = d.get('_speed_str', 'N/A').replace('\x1b[0;32m', '').replace('\x1b[0m', '').strip()
-                eta_str = d.get('_eta_str', 'N/A').replace('\x1b[0;33m', '').replace('\x1b[0m', '').strip()
-                percent = float(percent_str.replace('%', ''))
-                updater.update_sync(percent, speed_str, eta_str)
-            except Exception:
-                pass
-
-    ydl_opts = {
-        'format': ydl_format,
-        'outtmpl': os.path.join(tmp_dir, '%(title)s.%(ext)s'),
-        'merge_output_format': 'mp4' if quality != "audio" else None,
-        'postprocessors':[{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}] if quality == "audio" else [],
-        'progress_hooks':[my_hook],
-        'quiet': True,
-        'nocheckcertificate': True,
-        'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'tv', 'web']}}
-    }
-
-    if cookies_txt:
-        ydl_opts['cookiefile'] = cookies_txt
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        if quality == "audio":
-            filename = filename.rsplit('.', 1)[0] + '.mp3'
-        return filename
 
 async def download_media(url: str, quality: str, updater: ProgressUpdater, user_cookies: str = None):
     tmp_dir = "tmp_downloads"
     os.makedirs(tmp_dir, exist_ok=True)
 
+
     cookies_file = None
     if user_cookies and len(user_cookies.strip()) > 20:
         cookies_file = os.path.join(tmp_dir, f"cookies_{uuid.uuid4().hex[:6]}.txt")
         with open(cookies_file, "w", encoding="utf-8") as f:
-            f.write(user_cookies)
+            f.write(user_cookies.strip())
 
-    loop = asyncio.get_running_loop()
-    try:
-        downloaded_file = await loop.run_in_executor(
-            None, yt_dlp_download_sync, url, quality, updater, tmp_dir, cookies_file
-        )
-    finally:
-        if cookies_file and os.path.exists(cookies_file):
-            os.remove(cookies_file)
 
-    return downloaded_file
+    if quality == "720p":
+        ytdlp_args =["-f", "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best", "--merge-output-format", "mp4"]
+    elif quality == "480p":
+        ytdlp_args =["-f", "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best", "--merge-output-format", "mp4"]
+    elif quality == "360p":
+        ytdlp_args =["-f", "bestvideo[ext=mp4][height<=360]+bestaudio[ext=m4a]/best[ext=mp4][height<=360]/best", "--merge-output-format", "mp4"]
+    elif quality == "audio":
+        ytdlp_args =["-x", "--audio-format", "mp3"]
+    else:
+        ytdlp_args =["--merge-output-format", "mp4"]
+
+
+    file_id = uuid.uuid4().hex[:8]
+    outtmpl = os.path.join(tmp_dir, f"{file_id}_%(title)s.%(ext)s")
+
+
+    cmd =["yt-dlp", "--newline", "--no-warnings"]
+    if cookies_file:
+        cmd.extend(["--cookies", cookies_file])
+    cmd.extend(ytdlp_args)
+    cmd.extend(["-o", outtmpl, url])
+
+    updater.action_text = "Downloading Media"
+
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT
+    )
+
+
+    regex_progress = re.compile(r'\[download\]\s+([0-9\.]+)%.*at\s+([0-9a-zA-Z\./]+)\s+ETA\s+([0-9:]+)')
+
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+
+        text = line.decode('utf-8', errors='ignore').strip()
+
+
+        match = regex_progress.search(text)
+        if match:
+            try:
+                percent = float(match.group(1))
+                speed = match.group(2)
+                eta = match.group(3)
+                updater.update_sync(percent, speed, eta)
+            except:
+                pass
+
+    await process.wait()
+
+
+    if cookies_file and os.path.exists(cookies_file):
+        os.remove(cookies_file)
+
+
+    downloaded_files = glob.glob(os.path.join(tmp_dir, f"{file_id}_*"))
+    if downloaded_files:
+        return downloaded_files[0]
+    else:
+        raise Exception("YouTube Download Failed! JS Challenge or Cookie issue.")
