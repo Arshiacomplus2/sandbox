@@ -5,7 +5,6 @@ import uuid
 from core.progress import ProgressUpdater
 
 def yt_dlp_download_sync(url: str, quality: str, updater: ProgressUpdater, tmp_dir: str, cookies_txt: str = None):
-
     format_map = {
         "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "720p": "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best",
@@ -35,8 +34,8 @@ def yt_dlp_download_sync(url: str, quality: str, updater: ProgressUpdater, tmp_d
         'progress_hooks':[my_hook],
         'quiet': True,
         'nocheckcertificate': True,
-
-        'extractor_args': {'youtube': {'player_client': ['web', 'android']}}
+        # اینجا فقط web قرار داده شد تا با کوکی‌ها تداخل نکنه
+        'extractor_args': {'youtube': {'player_client': ['web']}}
     }
 
     if cookies_txt:
