@@ -24,11 +24,11 @@ async def process_archive(file_path: str, comp_mode: str, password: str, updater
         os.rename(file_path, final_path)
         return [final_path]
 
-
+    needs_split = file_size_mb > 95
     zip_path = os.path.join(dir_name, f"{new_base}.zip")
     cmd = ["7z", "a", "-tzip", "-mx=9"]
 
-    if file_size_mb > 95:
+    if needs_split:
         cmd.append("-v95m")
 
     if password and password != "None":
@@ -47,13 +47,24 @@ async def process_archive(file_path: str, comp_mode: str, password: str, updater
         os.remove(file_path)
 
 
-    generated_files = [
+    all_files = sorted([
         os.path.join(dir_name, f)
         for f in os.listdir(dir_name)
         if f.startswith(new_base + ".zip")
-    ]
+    ])
 
-    if not generated_files:
+    if not all_files:
         raise Exception("Archiving failed! No output files found.")
 
-    return sorted(generated_files)
+
+    if len(all_files) == 1:
+        single = all_files[0]
+
+        if single.endswith(".001"):
+            clean_path = single[:-4]
+            os.rename(single, clean_path)
+            return [clean_path]
+        return [single]
+
+
+    return all_files
