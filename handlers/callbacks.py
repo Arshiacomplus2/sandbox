@@ -113,7 +113,9 @@ async def run_batch(status_msg: Message, batch_id: str, chat_id: int):
                 try:
                     raw_links = await push_to_github(chat_id, user, final_files, updater)
                     success_links.extend(raw_links)
-                    await file_msg.edit_text(f"✅ **[{idx}/{len(urls)}] Uploaded!**", parse_mode="Markdown")
+                    # await file_msg.edit_text(f"✅ **[{idx}/{len(urls)}] Uploaded!**", parse_mode="Markdown")
+                    await file_msg.delete()
+
                 finally:
                     for f in final_files:
                         if os.path.exists(f): os.remove(f)
