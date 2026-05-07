@@ -9,6 +9,7 @@ async def download_media(url: str, quality: str, updater: ProgressUpdater, user_
     tmp_dir = "tmp_downloads"
     os.makedirs(tmp_dir, exist_ok=True)
 
+
     if quality == "720p":
         ytdlp_args = ["-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best", "--merge-output-format", "mp4"]
     elif quality == "480p":
@@ -25,22 +26,26 @@ async def download_media(url: str, quality: str, updater: ProgressUpdater, user_
     os.makedirs(dl_dir, exist_ok=True)
     outtmpl = os.path.join(dl_dir, "%(title)s.%(ext)s")
 
-    cookies_file_to_delete = None
-    if user_cookies and not os.path.isfile(user_cookies) and len(user_cookies.strip()) > 20:
-        cookies_file_to_delete = os.path.join(tmp_dir, f"cookies_{uuid.uuid4().hex[:6]}.txt")
-        with open(cookies_file_to_delete, "w", encoding="utf-8") as f:
+
+    cookie_path = None
+    if user_cookies and os.path.exists(user_cookies):
+        cookie_path = user_cookies
+    elif user_cookies and len(user_cookies.strip()) > 20:
+        cookie_path = os.path.join(tmp_dir, f"cookies_{uuid.uuid4().hex[:6]}.txt")
+        with open(cookie_path, "w", encoding="utf-8") as f:
             f.write(user_cookies.strip())
-        user_cookies = cookies_file_to_delete
 
-    async def run_ytdlp(with_cookies: bool) -> tuple[int, list[str]]:
-
+    async def run_ytdlp(use_cookies: bool) -> tuple[int, list[str]]:
         cmd = [
             "yt-dlp", "--newline", "--no-warnings",
-            "--force-ipv4", "--no-playlist",
-            "--extractor-args", "youtube:player_client=ios,web"
+            "--no-playlist",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "--extractor-args", "youtube:player_client=web"
         ]
-        if with_cookies and user_cookies and os.path.isfile(user_cookies) and os.path.getsize(user_cookies) > 50:
-            cmd.extend(["--cookies", user_cookies])
+
+        if use_cookies and cookie_path:
+            cmd.extend(["--cookies", cookie_path])
+
         cmd.extend(ytdlp_args)
         cmd.extend(["-o", outtmpl, url])
 
@@ -66,22 +71,23 @@ async def download_media(url: str, quality: str, updater: ProgressUpdater, user_
         await process.wait()
         return process.returncode, all_output
 
-    updater.action_text = "Downloading Media"
-
-    returncode, all_output = await run_ytdlp(with_cookies=True)
+    updater.action_text = "Downloading (Attempt 1)"
 
 
-    if returncode != 0:
+    returncode, all_output = await run_ytdlp(use_cookies=(cookie_path is not None))
+
+
+    if returncode != 0 and cookie_path:
         updater.action_text = "Retrying (No Cookies)..."
-        returncode, all_output = await run_ytdlp(with_cookies=False)
+        returncode, all_output = await run_ytdlp(use_cookies=False)
 
     downloaded_files = glob.glob(os.path.join(dl_dir, "*"))
 
-    if cookies_file_to_delete and os.path.exists(cookies_file_to_delete):
-        os.remove(cookies_file_to_delete)
+
+    if cookie_path and cookie_path.startswith(tmp_dir) and os.path.exists(cookie_path):
+        os.remove(cookie_path)
 
     if downloaded_files and returncode == 0:
         return downloaded_files[0]
     else:
-
-        raise Exception(f"yt-dlp failed:\n" + "\n".join(all_output))
+        raise Exception(f"yt-dlp failed:\n" + "\n".join(all_output[-10:]))
