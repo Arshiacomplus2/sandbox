@@ -49,25 +49,29 @@ async def download_media(url: str, quality: str, updater: ProgressUpdater, user_
         cmd.extend(ytdlp_args)
         cmd.extend(["-o", outtmpl, url])
 
+
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT
+            stderr=asyncio.subprocess.STDOUT,
+            env=os.environ
         )
 
-        regex_progress = re.compile(r'\[download\]\s+([0-9\.]+)%.*at\s+([0-9a-zA-Z\./]+)\s+ETA\s+([0-9:]+)')
         all_output = []
         while True:
             line = await process.stdout.readline()
             if not line: break
             text = line.decode('utf-8', errors='ignore').strip()
             all_output.append(text)
-            match = regex_progress.search(text)
-            if match:
+
+            if "[download]" in text and "%" in text:
                 try:
-                    percent = float(match.group(1))
-                    updater.update_sync(percent, match.group(2), match.group(3))
+                    parts = text.split()
+                    percent = float(parts[1].replace('%', ''))
+                    updater.update_sync(percent, "Downloading...", "...")
                 except: pass
+
         await process.wait()
         return process.returncode, all_output
 
